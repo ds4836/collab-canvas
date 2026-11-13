@@ -1,5 +1,5 @@
 import { useRef, useEffect } from "react";
-import socket from "../socket";
+import socket from "./socket";
 
 function Canvas() {
     const canvasRef = useRef(null);
@@ -48,6 +48,7 @@ function Canvas() {
     }
 
     function startDrawing(e){
+        console.log("Pointer down!");
         isDrawing.current = true;
         const rect = canvasRef.current.getBoundingClientRect();
         lastPosition.current = {
@@ -65,6 +66,8 @@ function Canvas() {
 
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+
+        const { x: fromX, y: fromY } = lastPosition.current;
 
         drawLine(ctx, fromX, fromY, x, y, "black", 5);
 
@@ -92,11 +95,11 @@ function Canvas() {
             ref={canvasRef}
             width={1000}
             height={1000}
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onMouseLeave={stopDrawing}
-            style={{ border: '1px solid #000' }}
+            onPointerDown={startDrawing}
+            onPointerMove={draw}
+            onPointerUp={stopDrawing}
+            onPointerLeave={stopDrawing}
+            style={{ border: '1px solid #000', cursor: "crosshair", touchAction: "none" }}
         />
     )
 }
