@@ -1,107 +1,152 @@
-import { useRef, useEffect } from "react";
-import socket from "./socket";
+import { useRef, useEffect, useState } from 'react';
+import { socketUrl } from './socket';
 
-function Canvas() {
-    const canvasRef = useRef(null);
-    const isDrawing = useRef(false);
-    const lastPosition = useRef(null);
-
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
-
-        canvas.width = 1000;
-        canvas.height = 1000;
-
-        ctx.lineWidth = 5;
-        ctx.lineCap = "round";
-
-        const handleMessage = (event) => {
-            const data = JSON.parse(event.data);
-
-            if (data.type === "draw") {
-                drawLine(
-                    ctx,
-                    data.fromX,
-                    data.fromY,
-                    data.toX,
-                    data.toY,
-                    data.color,
-                    data.brushSize
-                );
-            }
-        };
-
-        socket.addEventListener("message", handleMessage);
-        return () => {
-            socket.removeEventListener("message", handleMessage);
-        }
-    }, [])
-
-    function drawLine(ctx, fromX, fromY, toX, toY, color, size){
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = size;
-        ctx.moveTo(fromX, fromY);
-        ctx.lineTo(toX, toY);
-        ctx.stroke();
-    }
-
-    function startDrawing(e){
-        console.log("Pointer down!");
-        isDrawing.current = true;
-        const rect = canvasRef.current.getBoundingClientRect();
-        lastPosition.current = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        }
-    }
-
-    function draw(e) {
-        if (!isDrawing.current) return;
-
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
-        const rect = canvas.getBoundingClientRect();
-
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        const { x: fromX, y: fromY } = lastPosition.current;
-
-        drawLine(ctx, fromX, fromY, x, y, "black", 5);
-
-        if (socket.readyState === WebSocket.OPEN){
-            socket.send(JSON.stringify({
-                type: "draw",
-                fromX,
-                fromY,
-                toX: x,
-                toY: y,
-                color: "black",
-                brushSize: 5
-            }))
-        }
-        lastPosition.current = { x, y };
-    }
-
-    function stopDrawing() {
-        isDrawing.current = false;
-        lastPosition.current = null;
-    }
-
-    return (
-        <canvas
-            ref={canvasRef}
-            width={1000}
-            height={1000}
-            onPointerDown={startDrawing}
-            onPointerMove={draw}
-            onPointerUp={stopDrawing}
-            onPointerLeave={stopDrawing}
-            style={{ border: '1px solid #000', cursor: "crosshair", touchAction: "none" }}
-        />
-    )
+function drawLine(ctx, { px, py, x, y, c, w }) {
+  ctx.beginPath();
+  ctx.strokeStyle = c;
+  ctx.lineWidth = w;
+  ctx.lineCap = 'round';
+  ctx.moveTo(px, py);
+  ctx.lineTo(x, y);
+  ctx.stroke();
 }
 
-export default Canvas;
+export default function Canvas() {
+  const canvasRef = useRef(null);
+  const connection = useRef(null);
+  const ready = useRef(false);
+  const lastPosition = useRef(null);
+  const pointerId = useRef(null);
+  const [status, setStatus] = useState('Connecting…');
+  const [connected, setConnected] = useState(false);
+  const [people, setPeople] = useState(0);
+
+  useEffect(() => {
+    const ctx = canvasRef.current.getContext('2d');
+    let disposed = false;
+    let retryTimer;
+    let delay = 500;
+    const members = new Set();
+
+    function connect() {
+      if (disposed) return;
+      let ws;
+      try {
+        ws = new WebSocket(socketUrl());
+      } catch (error) {
+        setStatus(error.message);
+        return;
+      }
+      connection.current = ws;
+      ws.addEventListener('message', (event) => {
+        if (disposed) return;
+        let message;
+        try { message = JSON.parse(event.data); } catch { return; }
+        switch (message.type) {
+          case 'sync_history':
+            ctx.clearRect(0, 0, 1000, 1000);
+            message.d.forEach((segment) => drawLine(ctx, segment));
+            members.clear();
+            ready.current = true;
+            delay = 500;
+            setConnected(true);
+            setStatus('Connected');
+            break;
+          case 'broadcast_draw':
+            message.d.forEach((segment) => drawLine(ctx, segment));
+            break;
+          case 'clear':
+            ctx.clearRect(0, 0, 1000, 1000);
+            lastPosition.current = null;
+            pointerId.current = null;
+            break;
+          case 'presence':
+            if (message.e === 'join') members.add(message.id);
+            else members.delete(message.id);
+            setPeople(members.size);
+            break;
+          default:
+            break;
+        }
+      });
+      ws.addEventListener('close', (event) => {
+        if (disposed) return;
+        ready.current = false;
+        lastPosition.current = null;
+        pointerId.current = null;
+        setConnected(false);
+        setPeople(0);
+        if (event.code === 1008) {
+          setStatus(event.reason || 'Server rejected the drawing.');
+          return;
+        }
+        setStatus('Reconnecting…');
+        retryTimer = setTimeout(connect, delay + Math.random() * 250);
+        delay = Math.min(delay * 2, 10000);
+      });
+    }
+    connect();
+    return () => {
+      disposed = true;
+      clearTimeout(retryTimer);
+      ready.current = false;
+      connection.current?.close();
+    };
+  }, []);
+
+  function position(event) {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1000, (event.clientX - rect.left) * 1000 / rect.width)),
+      y: Math.max(0, Math.min(1000, (event.clientY - rect.top) * 1000 / rect.height))
+    };
+  }
+
+  function startDrawing(event) {
+    if (!ready.current || pointerId.current !== null || event.button !== 0) return;
+    pointerId.current = event.pointerId;
+    lastPosition.current = position(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function draw(event) {
+    if (pointerId.current !== event.pointerId || !lastPosition.current ||
+      !ready.current || connection.current?.readyState !== WebSocket.OPEN) return;
+    const { x, y } = position(event);
+    const segment = { px: lastPosition.current.x, py: lastPosition.current.y, x, y, c: '#000000', w: 5 };
+    connection.current.send(JSON.stringify({ type: 'draw', d: [segment] }));
+    drawLine(canvasRef.current.getContext('2d'), segment);
+    lastPosition.current = { x, y };
+  }
+
+  function stopDrawing(event) {
+    if (pointerId.current !== event.pointerId) return;
+    pointerId.current = null;
+    lastPosition.current = null;
+  }
+
+  return (
+    <main className="canvas-app">
+      <div className="canvas-toolbar">
+        <p role="status">{status}{connected ? ` · ${people} ${people === 1 ? 'person' : 'people'} online` : ''}</p>
+        <button disabled={!connected} onClick={() => {
+          if (ready.current && connection.current?.readyState === WebSocket.OPEN) {
+            connection.current.send(JSON.stringify({ type: 'clear' }));
+          }
+        }}>Clear canvas</button>
+      </div>
+      <p className="canvas-hint">Open this same link on another device or in a private window to draw together.</p>
+      <canvas
+        ref={canvasRef}
+        width={1000}
+        height={1000}
+        aria-label="Shared drawing canvas"
+        onPointerDown={startDrawing}
+        onPointerMove={draw}
+        onPointerUp={stopDrawing}
+        onPointerCancel={stopDrawing}
+        onLostPointerCapture={stopDrawing}
+      />
+    </main>
+  );
+}

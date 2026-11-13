@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "wrangler dev --port 3001",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "legacy": "node index.js"
   },
   "keywords": [],
   "author": "",
@@ -14,5 +17,8 @@
     "express": "^5.3.0",
     "socket.io": "^4.8.4",
     "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.161.0"
   }
 }

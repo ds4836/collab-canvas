@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "collab-canvas-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-12",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "CanvasRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CanvasRoom"] }]
+}
