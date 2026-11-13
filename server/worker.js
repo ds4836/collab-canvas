@@ -85,6 +85,8 @@ export class CanvasRoom extends DurableObject {
 
   webSocketClose(ws, code, reason) {
     this.disconnect(ws);
+    // 1006 reports a lost transport and must never be sent in a close frame.
+    if (code === 1006) return;
     ws.close(code === 1005 ? 1000 : code, reason);
   }
   webSocketError(ws) { this.disconnect(ws); ws.close(1011, 'Connection error'); }
